@@ -1,3 +1,18 @@
+# Web framework
 flask>=3.0
-mysql-connector-python>=8.0
+flask-sqlalchemy>=3.1
+
+# PostgreSQL driver — binary wheel, no compilation needed on Render
+psycopg2-binary>=2.9
+
+# Production WSGI server
+gunicorn>=21.2
+
+# Static file serving without Nginx
+whitenoise>=6.6
+
+# Anthropic API (AI Insights feature)
 requests>=2.31
+
+# Environment variable loading (local dev only — Render injects env vars directly)
+python-dotenv>=1.0

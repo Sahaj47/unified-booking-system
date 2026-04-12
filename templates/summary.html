@@ -2,34 +2,64 @@
 {% block title %}Summary{% endblock %}
 
 {% block content %}
-<h4 class="fw-bold mb-1">Booking Summary</h4>
-<p class="text-muted small mb-3">
-  Powered by the <code>booking_schedule</code> SQL VIEW
-</p>
+<h4 class="fw-bold mb-1">📊 Booking Summary</h4>
+<p class="text-muted small mb-4">Visible to augsd only.</p>
 
-<!-- Full schedule from VIEW -->
-<div class="table-responsive mb-5">
+{# Stat cards #}
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <div class="card text-center border-primary">
+      <div class="card-body">
+        <h2 class="text-primary fw-bold">{{ total }}</h2>
+        <p class="mb-0 text-muted small">Total Bookings</p>
+      </div>
+    </div>
+  </div>
+  {% for status, count in by_status %}
+  {% set sc = {'approved':'success','pending':'warning','rejected':'danger','cancelled':'secondary'} %}
+  <div class="col-md-2">
+    <div class="card text-center">
+      <div class="card-body">
+        <h3 class="fw-bold text-{{ sc.get(status,'secondary') }}">{{ count }}</h3>
+        <p class="mb-0 text-muted small">{{ status | capitalize }}</p>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{# Top resources #}
+<h6 class="fw-bold mb-2">Top Resources by Booking Count</h6>
+<ul class="list-group mb-4">
+  {% for name, count in top_resources %}
+  <li class="list-group-item d-flex justify-content-between">
+    <span>{{ name }}</span>
+    <span class="badge bg-primary">{{ count }} bookings</span>
+  </li>
+  {% endfor %}
+</ul>
+
+{# Recent 50 bookings #}
+<h6 class="fw-bold mb-2">Recent Bookings</h6>
+<div class="table-responsive">
   <table class="table table-sm table-striped table-bordered">
     <thead class="table-dark">
       <tr>
-        <th>#</th><th>User</th><th>Dept</th>
-        <th>Resource</th><th>Slot</th>
-        <th>Date</th><th>Status</th>
+        <th>#</th><th>User</th><th>Resource</th>
+        <th>Slot</th><th>Date</th><th>Status</th>
       </tr>
     </thead>
     <tbody>
-      {% for b in bookings %}
+      {% for b in recent %}
+      {% set bm = {'approved':'success','pending':'warning','rejected':'danger','cancelled':'secondary'} %}
       <tr>
         <td>{{ b.booking_id }}</td>
-        <td>{{ b.user_name }}</td>
-        <td>{{ b.dept_name }}</td>
-        <td>{{ b.resource_name }}</td>
-        <td>{{ b.time_slot }}</td>
+        <td>{{ b.user.name }}</td>
+        <td>{{ b.resource.name }}</td>
+        <td>{{ b.slot.label }}</td>
         <td>{{ b.booking_date }}</td>
         <td>
-          {% set badge = {'approved':'success','pending':'warning',
-                          'rejected':'danger','cancelled':'secondary'} %}
-          <span class="badge bg-{{ badge.get(b.status,'secondary') }}">
+          <span class="badge bg-{{ bm.get(b.status,'secondary') }}">
             {{ b.status | capitalize }}
           </span>
         </td>
@@ -38,38 +68,4 @@
     </tbody>
   </table>
 </div>
-
-<!-- Stored procedure result -->
-<h5 class="fw-bold">
-  Stored Procedure Result —
-  <code>CALL GetBookingsByResource(1)</code>
-  <span class="text-muted">(CS Lab A)</span>
-</h5>
-
-{% if proc_results %}
-<div class="table-responsive">
-  <table class="table table-sm table-bordered">
-    <thead class="table-secondary">
-      <tr>
-        <th>#</th><th>User</th><th>Resource</th>
-        <th>Slot</th><th>Date</th><th>Status</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for r in proc_results %}
-      <tr>
-        <td>{{ r.booking_id }}</td>
-        <td>{{ r.user_name }}</td>
-        <td>{{ r.resource_name }}</td>
-        <td>{{ r.slot }}</td>
-        <td>{{ r.booking_date }}</td>
-        <td>{{ r.status }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% else %}
-<p class="text-muted">No bookings found for CS Lab A.</p>
-{% endif %}
 {% endblock %}

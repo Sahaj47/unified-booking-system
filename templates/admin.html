@@ -1,64 +1,267 @@
 {% extends "base.html" %}
-{% block title %}Admin – Approvals{% endblock %}
+{% block title %}Admin Panel{% endblock %}
 
 {% block content %}
-<h4 class="fw-bold mb-3">⚙ Admin Panel — Pending Approvals</h4>
+<h4 class="fw-bold mb-3">⚙ Admin Panel (augsd)</h4>
 
-{% if pending %}
-<div class="table-responsive">
-  <table class="table table-bordered align-middle">
-    <thead class="table-warning">
-      <tr>
-        <th>Booking #</th>
-        <th>User</th>
-        <th>Resource</th>
-        <th>Slot</th>
-        <th>Date</th>
-        <th>Status</th>
-        <th>Action</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for p in pending %}
-      <tr>
-        <td>{{ p.booking_id }}</td>
-        <td>{{ p.user_name }}</td>
-        <td>{{ p.resource_name }}</td>
-        <td>{{ p.time_slot }}</td>
-        <td>{{ p.booking_date }}</td>
-        <td>
-          <span class="badge bg-warning text-dark">Pending</span>
-        </td>
-        <td>
-          <!-- Approve form -->
-          <form method="POST"
-                action="{{ url_for('approve', booking_id=p.booking_id) }}"
-                class="d-inline approveForm">
-            <input type="hidden" name="action" value="approved">
-            <input type="text" name="remarks" class="form-control form-control-sm d-inline w-auto"
-                   placeholder="Remarks (optional)" style="max-width:160px">
-            <button type="submit" class="btn btn-success btn-sm">✔ Approve</button>
-          </form>
+<ul class="nav nav-tabs mb-3" id="adminTabs" role="tablist">
+  <li class="nav-item">
+    <button class="nav-link active" id="btn-bookings"
+            data-bs-toggle="tab" data-bs-target="#tab-bookings">
+      All Bookings
+    </button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" id="btn-resources"
+            data-bs-toggle="tab" data-bs-target="#tab-resources">
+      Resources
+    </button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" id="btn-rules"
+            data-bs-toggle="tab" data-bs-target="#tab-rules">
+      Approval Rules
+    </button>
+  </li>
+</ul>
 
-          <!-- Reject form -->
-          <form method="POST"
-                action="{{ url_for('approve', booking_id=p.booking_id) }}"
-                class="d-inline ms-1">
-            <input type="hidden" name="action" value="rejected">
-            <button type="submit" class="btn btn-danger btn-sm"
-                    onclick="return confirm('Reject this booking?')">
-              ✖ Reject
-            </button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<div class="tab-content">
+
+  {# ══ TAB 1: All Bookings + Override ════════════════════════ #}
+  <div class="tab-pane fade show active" id="tab-bookings">
+    <div class="table-responsive">
+      <table class="table table-sm table-hover table-bordered align-middle">
+        <thead class="table-dark">
+          <tr>
+            <th>#</th><th>User</th><th>Resource</th>
+            <th>Slot</th><th>Date</th><th>Status</th>
+            <th>Approval</th><th>Override</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for b in all_bookings %}
+          {% set bm = {'approved':'success','pending':'warning','rejected':'danger','cancelled':'secondary'} %}
+          <tr>
+            <td>{{ b.booking_id }}</td>
+            <td>{{ b.user.name }}</td>
+            <td>{{ b.resource.name }}</td>
+            <td>{{ b.slot.label }}</td>
+            <td>{{ b.booking_date }}</td>
+            <td>
+              <span class="badge bg-{{ bm.get(b.status,'secondary') }}">
+                {{ b.status | capitalize }}
+              </span>
+            </td>
+            <td class="small">
+              {% if b.requires_approval and b.approvals %}
+                {% set rule = b.resource.approval_rule %}
+                {% set total = b.approvals | length %}
+                {% set appr  = b.approvals | selectattr('status','equalto','approved') | list | length %}
+                {% if rule %}
+                <span class="badge bg-info text-dark">{{ rule.rule_type }}</span>
+                {% endif %}
+                {{ appr }}/{{ total }}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+            <td>
+              {% if b.status == 'pending' %}
+              <form method="POST"
+                    action="{{ url_for('admin_override', booking_id=b.booking_id) }}"
+                    class="d-inline">
+                <input type="text" name="reason" class="form-control form-control-sm d-inline"
+                       style="width:130px" placeholder="Reason">
+                <button name="action" value="approved"
+                        class="btn btn-success btn-sm mt-1">✔</button>
+                <button name="action" value="rejected"
+                        class="btn btn-danger btn-sm mt-1"
+                        onclick="return confirm('Reject?')">✖</button>
+              </form>
+              {% else %}
+                <span class="text-muted small">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {# ══ TAB 2: Resource Management ════════════════════════════ #}
+  <div class="tab-pane fade" id="tab-resources">
+
+    {# Add resource form #}
+    <div class="card mb-4">
+      <div class="card-header fw-semibold">Add New Resource</div>
+      <div class="card-body">
+        <form method="POST" action="{{ url_for('admin_add_resource') }}"
+              class="row g-2">
+          <div class="col-md-3">
+            <input type="text" name="name" class="form-control form-control-sm"
+                   placeholder="Resource name" required>
+          </div>
+          <div class="col-md-2">
+            <select name="type_id" class="form-select form-select-sm" required>
+              <option value="">Type</option>
+              {% for t in resource_types %}
+              <option value="{{ t.type_id }}">{{ t.type_name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-2">
+            <select name="dept_id" class="form-select form-select-sm" required>
+              <option value="">Department</option>
+              {% for d in departments %}
+              <option value="{{ d.dept_id }}">{{ d.dept_name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-1">
+            <input type="number" name="capacity" class="form-control form-control-sm"
+                   placeholder="Cap." min="1" value="1">
+          </div>
+          <div class="col-md-2 d-flex align-items-center gap-1">
+            <input type="checkbox" name="requires_approval" id="reqApproval" class="form-check-input">
+            <label for="reqApproval" class="small">Needs approval</label>
+          </div>
+          <div class="col-md-2">
+            <button type="submit" class="btn btn-primary btn-sm w-100">Add Resource</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    {# Resource list #}
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered">
+        <thead class="table-secondary">
+          <tr>
+            <th>#</th><th>Name</th><th>Type</th><th>Dept</th>
+            <th>Capacity</th><th>Approval?</th><th>Active</th><th>Toggle</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in all_resources %}
+          <tr class="{{ '' if r.is_active else 'table-secondary text-muted' }}">
+            <td>{{ r.resource_id }}</td>
+            <td>{{ r.name }}</td>
+            <td>{{ r.resource_type.type_name }}</td>
+            <td>{{ r.department.dept_name }}</td>
+            <td>{{ r.capacity }}</td>
+            <td>{{ 'Yes' if r.requires_approval else 'No' }}</td>
+            <td>
+              <span class="badge {{ 'bg-success' if r.is_active else 'bg-secondary' }}">
+                {{ 'Active' if r.is_active else 'Inactive' }}
+              </span>
+            </td>
+            <td>
+              <form method="POST"
+                    action="{{ url_for('admin_toggle_resource', resource_id=r.resource_id) }}"
+                    class="d-inline">
+                <button class="btn btn-sm {{ 'btn-outline-danger' if r.is_active else 'btn-outline-success' }}">
+                  {{ 'Deactivate' if r.is_active else 'Activate' }}
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {# ══ TAB 3: Approval Rules per Resource ═════════════════════ #}
+  <div class="tab-pane fade" id="tab-rules">
+    {% for r in all_resources if r.requires_approval %}
+    {% set rule = rules.get(r.resource_id) %}
+    {% set maps = faculty_maps.get(r.resource_id, []) %}
+
+    <div class="card mb-4">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span class="fw-semibold">{{ r.name }}</span>
+        {% if rule %}
+        <span class="badge bg-info text-dark">Current rule: {{ rule.rule_type }}</span>
+        {% else %}
+        <span class="badge bg-secondary">No rule set</span>
+        {% endif %}
+      </div>
+      <div class="card-body">
+
+        {# Set rule type #}
+        <form method="POST" action="{{ url_for('admin_set_rule') }}"
+              class="row g-2 align-items-end mb-3">
+          <input type="hidden" name="resource_id" value="{{ r.resource_id }}">
+          <div class="col-auto">
+            <label class="form-label small mb-1">Approval rule</label>
+            <select name="rule_type" class="form-select form-select-sm">
+              <option value="ANY" {{ 'selected' if rule and rule.rule_type == 'ANY' }}>
+                ANY (one approval sufficient)
+              </option>
+              <option value="ALL" {{ 'selected' if rule and rule.rule_type == 'ALL' }}>
+                ALL (every faculty must approve)
+              </option>
+            </select>
+          </div>
+          <div class="col-auto">
+            <button class="btn btn-primary btn-sm">Save Rule</button>
+          </div>
+        </form>
+
+        {# Current faculty assignments #}
+        <p class="small fw-semibold mb-1">Assigned faculty:</p>
+        {% if maps %}
+        <ul class="list-group list-group-flush mb-3">
+          {% for m in maps %}
+          <li class="list-group-item py-1 d-flex justify-content-between align-items-center">
+            {{ m.faculty.name }} ({{ m.faculty.email }})
+            <form method="POST"
+                  action="{{ url_for('admin_remove_faculty', mapping_id=m.mapping_id) }}"
+                  class="d-inline">
+              <button class="btn btn-outline-danger btn-sm py-0"
+                      onclick="return confirm('Remove this faculty?')">Remove</button>
+            </form>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-muted small mb-2">No faculty assigned yet.</p>
+        {% endif %}
+
+        {# Add faculty #}
+        <form method="POST" action="{{ url_for('admin_add_faculty') }}"
+              class="row g-2 align-items-end">
+          <input type="hidden" name="resource_id" value="{{ r.resource_id }}">
+          <div class="col-auto">
+            <label class="form-label small mb-1">Add faculty</label>
+            <select name="faculty_id" class="form-select form-select-sm">
+              {% for f in all_faculty %}
+              <option value="{{ f.user_id }}">{{ f.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-auto">
+            <button class="btn btn-outline-primary btn-sm">Assign</button>
+          </div>
+        </form>
+
+      </div>
+    </div>
+    {% else %}
+    <p class="text-muted">No resources with approval enabled. 
+       Add a resource with "Needs approval" checked.</p>
+    {% endfor %}
+  </div>
+
 </div>
-{% else %}
-<div class="alert alert-success">
-  ✅ No pending approvals at the moment.
-</div>
-{% endif %}
+
+<script>
+/* Restore tab from URL hash after form submission redirects */
+const hash = location.hash;
+if (hash) {
+  const btn = document.querySelector(`[data-bs-target="${hash}"]`);
+  if (btn) bootstrap.Tab.getOrCreateInstance(btn).show();
+}
+</script>
 {% endblock %}

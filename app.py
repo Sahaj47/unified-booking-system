@@ -1,22 +1,45 @@
-# ── app.py ────────────────────────────────────────────────────
-# All Flask routes for the Unified Resource Booking System.
-# Uses raw SQL only — no ORM.
+# app.py — only the app factory section changes.
+# All routes, decorators, and helpers are UNCHANGED.
 
 import json
+import requests
+from datetime import datetime
 from functools import wraps
 
-import requests
 from flask import (Flask, flash, redirect, render_template,
                    request, session, url_for)
+from sqlalchemy import func
 
-import db
-from config import ANTHROPIC_API_KEY, SECRET_KEY
+# WhiteNoise serves /static/ directly from gunicorn — no Nginx needed on Render
+from whitenoise import WhiteNoise
+
+from config import SQLALCHEMY_DATABASE_URI, SECRET_KEY, ANTHROPIC_API_KEY
+from models import (db, Department, Role, User, ResourceType, Resource,
+                    TimeSlot, ResourceApprovalRule, ResourceFacultyMapping,
+                    Booking, Approval, UsageLog)
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
+app.config['SQLALCHEMY_DATABASE_URI']        = SQLALCHEMY_DATABASE_URI
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+db.init_app(app)
 
-# ── Auth decorators ───────────────────────────────────────────
+# Serve static files via WhiteNoise (works without a reverse proxy on Render)
+app.wsgi_app = WhiteNoise(app.wsgi_app, root='static/', prefix='static')
+
+# ── Database initialisation ───────────────────────────────────
+# db.create_all() is safe to call on every startup:
+# SQLAlchemy checks IF NOT EXISTS before creating any table.
+# This replaces the manual `python seed.py` step for table creation.
+# Seeding (inserting rows) still requires running seed.py once manually.
+
+with app.app_context():
+    db.create_all()
+
+# ═══════════════════════════════════════════════════════════════
+# DECORATORS
+# ═══════════════════════════════════════════════════════════════
 
 def login_required(f):
     @wraps(f)
@@ -27,23 +50,39 @@ def login_required(f):
     return decorated
 
 
-def admin_required(f):
+def faculty_required(f):
+    """Allows faculty (role 2) and augsd (role 3)."""
     @wraps(f)
     def decorated(*args, **kwargs):
-        if session.get('role_id') != 3:
-            return render_template('base.html',
-                                   error="Access denied: Admins only."), 403
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        if session.get('role_id') not in [2, 3]:
+            flash('Faculty access required.', 'danger')
+            return redirect(url_for('dashboard'))
         return f(*args, **kwargs)
     return decorated
 
 
-# ── Auth routes ───────────────────────────────────────────────
+def augsd_required(f):
+    """Allows only the augsd superuser (role 3)."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        if session.get('role_id') != 3:
+            flash('Admin (augsd) access required.', 'danger')
+            return redirect(url_for('dashboard'))
+        return f(*args, **kwargs)
+    return decorated
+
+
+# ═══════════════════════════════════════════════════════════════
+# AUTH
+# ═══════════════════════════════════════════════════════════════
 
 @app.route('/')
 def index():
-    if 'user_id' in session:
-        return redirect(url_for('dashboard'))
-    return redirect(url_for('login'))
+    return redirect(url_for('dashboard') if 'user_id' in session else url_for('login'))
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -52,42 +91,21 @@ def login():
     if request.method == 'POST':
         email    = request.form.get('email', '').strip()
         password = request.form.get('password', '')
-
-        conn   = db.get_connection()
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute(
-            "SELECT user_id, name, role_id FROM users "
-            "WHERE email = %s AND password = %s",
-            (email, password)
-        )
-        user = cursor.fetchone()
-        cursor.close()
-        conn.close()
-
+        user     = User.query.filter_by(email=email, password=password).first()
         if user:
-            session['user_id'] = user['user_id']
-            session['name']    = user['name']
-            session['role_id'] = user['role_id']
+            session['user_id'] = user.user_id
+            session['name']    = user.name
+            session['role_id'] = user.role_id
             return redirect(url_for('dashboard'))
         error = 'Invalid email or password.'
-
     return render_template('login.html', error=error)
+
 
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
-    conn   = db.get_connection()
-    cursor = conn.cursor(dictionary=True)
-
-    # Load departments and roles for the form dropdowns
-    # Roles: only student (1) and faculty (2) — admins are created manually
-    cursor.execute("SELECT dept_id, dept_name FROM departments ORDER BY dept_name")
-    departments = cursor.fetchall()
-
-    cursor.execute(
-        "SELECT role_id, role_name FROM roles WHERE role_name != 'admin'"
-    )
-    roles = cursor.fetchall()
-
+    # augsd role cannot be self-registered
+    departments = Department.query.order_by(Department.dept_name).all()
+    roles       = Role.query.filter(Role.role_name != 'augsd').all()
     error = message = None
 
     if request.method == 'POST':
@@ -98,40 +116,27 @@ def signup():
         dept_id  = request.form.get('dept_id')
         role_id  = request.form.get('role_id')
 
-        # Server-side validation
         if not all([name, email, password, dept_id, role_id]):
-            error = "All fields are required."
+            error = 'All fields are required.'
         elif password != confirm:
-            error = "Passwords do not match."
+            error = 'Passwords do not match.'
         elif len(password) < 6:
-            error = "Password must be at least 6 characters."
+            error = 'Password must be at least 6 characters.'
+        elif User.query.filter_by(email=email).first():
+            error = 'An account with this email already exists.'
         else:
-            # Check if email is already registered
-            cursor.execute(
-                "SELECT user_id FROM users WHERE email = %s", (email,)
-            )
-            if cursor.fetchone():
-                error = "An account with this email already exists."
-            else:
-                try:
-                    cursor.execute(
-                        "INSERT INTO users (name, email, password, dept_id, role_id) "
-                        "VALUES (%s, %s, %s, %s, %s)",
-                        (name, email, password, dept_id, role_id)
-                    )
-                    conn.commit()
-                    message = "Account created! You can now log in."
-                except Exception as exc:
-                    conn.rollback()
-                    error = f"Registration failed: {exc}"
+            try:
+                db.session.add(User(name=name, email=email, password=password,
+                                    dept_id=dept_id, role_id=role_id))
+                db.session.commit()
+                message = 'Account created! You can now sign in.'
+            except Exception as e:
+                db.session.rollback()
+                error = f'Registration failed: {e}'
 
-    cursor.close()
-    conn.close()
-    return render_template('signup.html',
-                           departments=departments,
-                           roles=roles,
-                           error=error,
-                           message=message)
+    return render_template('signup.html', departments=departments, roles=roles,
+                           error=error, message=message)
+
 
 @app.route('/logout')
 def logout():
@@ -139,330 +144,411 @@ def logout():
     return redirect(url_for('login'))
 
 
-# ── Dashboard ─────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# DASHBOARD
+# ═══════════════════════════════════════════════════════════════
 
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    conn   = db.get_connection()
-    cursor = conn.cursor(dictionary=True)
-
-    if session['role_id'] == 3:          # admin sees everything
-        cursor.execute(
-            "SELECT * FROM booking_schedule "
-            "ORDER BY booking_date DESC, start_time"
-        )
-    else:                                # users see their own bookings
-        cursor.execute(
-            "SELECT * FROM booking_schedule "
-            "WHERE user_id = %s "
-            "ORDER BY booking_date DESC, start_time",
-            (session['user_id'],)
-        )
-
-    bookings = cursor.fetchall()
-    cursor.close()
-    conn.close()
+    if session['role_id'] == 3:   # augsd sees everything
+        bookings = Booking.query.order_by(Booking.created_at.desc()).all()
+    else:
+        bookings = (Booking.query
+                    .filter_by(user_id=session['user_id'])
+                    .order_by(Booking.created_at.desc())
+                    .all())
     return render_template('dashboard.html', bookings=bookings)
 
 
-# ── Booking form ──────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# BOOKING
+# ═══════════════════════════════════════════════════════════════
 
 @app.route('/book', methods=['GET', 'POST'])
 @login_required
 def book():
-    conn   = db.get_connection()
-    cursor = conn.cursor(dictionary=True)
+    resources = Resource.query.filter_by(is_active=True).all()
+    slots     = TimeSlot.query.order_by(TimeSlot.start_time).all()
 
-    # Always load form options
-    cursor.execute(
-        "SELECT resource_id, name, capacity, requires_approval "
-        "FROM resources WHERE is_active = 1"
-    )
-    resources = cursor.fetchall()
+    # Build approval-info dict passed to JS for dynamic hints
+    approval_info = {}
+    for r in resources:
+        if r.requires_approval:
+            rule = r.approval_rule
+            approval_info[r.resource_id] = {
+                'rule_type':    rule.rule_type if rule else 'ANY',
+                'faculty_count': len(r.faculty_mappings)
+            }
 
-    cursor.execute(
-        "SELECT slot_id, label, start_time, end_time "
-        "FROM time_slots ORDER BY start_time"
-    )
-    slots = cursor.fetchall()
-
-    message = error = None
+    error = message = None
 
     if request.method == 'POST':
-        resource_id  = request.form.get('resource_id')
-        slot_id      = request.form.get('slot_id')
-        booking_date = request.form.get('booking_date')
+        resource_id  = int(request.form['resource_id'])
+        slot_id      = int(request.form['slot_id'])
+        booking_date = request.form['booking_date']
+        resource     = Resource.query.get_or_404(resource_id)
 
-        # Determine initial status from resource flag
-        cursor.execute(
-            "SELECT requires_approval FROM resources "
-            "WHERE resource_id = %s", (resource_id,)
-        )
-        resource = cursor.fetchone()
-        req_approval = resource['requires_approval']
-        status       = 'pending' if req_approval else 'approved'
-
-        try:
-            cursor.execute(
-                "INSERT INTO bookings "
-                "(user_id, resource_id, slot_id, booking_date, "
-                " status, requires_approval) "
-                "VALUES (%s, %s, %s, %s, %s, %s)",
-                (session['user_id'], resource_id, slot_id,
-                 booking_date, status, req_approval)
-            )
-            conn.commit()
-
-            # Auto-log usage for instantly approved bookings
-            if status == 'approved':
-                booking_id = cursor.lastrowid
-                cursor.execute(
-                    "INSERT INTO usage_logs (booking_id) VALUES (%s)",
-                    (booking_id,)
+        # Conflict check (replaces the old DB trigger)
+        conflict = (Booking.query
+                    .filter_by(resource_id=resource_id,
+                               slot_id=slot_id,
+                               booking_date=booking_date)
+                    .filter(Booking.status.in_(['pending', 'approved']))
+                    .first())
+        if conflict:
+            error = 'Conflict: this resource is already booked for that slot and date.'
+        else:
+            req_approval = resource.requires_approval
+            status       = 'pending' if req_approval else 'approved'
+            try:
+                booking = Booking(
+                    user_id=session['user_id'],
+                    resource_id=resource_id,
+                    slot_id=slot_id,
+                    booking_date=booking_date,
+                    status=status,
+                    requires_approval=req_approval
                 )
-                conn.commit()
+                db.session.add(booking)
+                db.session.flush()   # get booking_id before commit
 
-            message = ("Booking confirmed!" if status == 'approved'
-                       else "Booking submitted — awaiting admin approval.")
+                # Create one Approval row per mapped faculty
+                if req_approval:
+                    for mapping in resource.faculty_mappings:
+                        db.session.add(Approval(
+                            booking_id=booking.booking_id,
+                            faculty_id=mapping.faculty_id,
+                            status='pending'
+                        ))
 
-        except Exception as exc:
-            conn.rollback()
-            msg = str(exc)
-            error = ("Conflict: that resource is already booked for this "
-                     "slot and date." if "already booked" in msg else msg)
+                # Auto-log immediately approved bookings
+                if status == 'approved':
+                    db.session.add(UsageLog(booking_id=booking.booking_id))
 
-    cursor.close()
-    conn.close()
-    return render_template('book.html',
-                           resources=resources, slots=slots,
-                           message=message, error=error)
+                db.session.commit()
+                message = ('Booking confirmed!' if status == 'approved'
+                           else 'Booking submitted — awaiting faculty approval.')
+            except Exception as e:
+                db.session.rollback()
+                error = f'Booking failed: {e}'
+
+    return render_template('book.html', resources=resources, slots=slots,
+                           approval_info=approval_info,
+                           error=error, message=message)
 
 
-# ── Admin / approval page ─────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# FACULTY DASHBOARD
+# ═══════════════════════════════════════════════════════════════
+
+@app.route('/faculty')
+@faculty_required
+def faculty_dashboard():
+    fid = session['user_id']
+
+    # Pending approvals where this faculty has not yet acted
+    pending = (Approval.query
+               .filter_by(faculty_id=fid, status='pending')
+               .join(Booking)
+               .filter(Booking.status == 'pending')
+               .all())
+
+    # Action history (last 20)
+    history = (Approval.query
+               .filter(Approval.faculty_id == fid,
+                       Approval.status != 'pending')
+               .order_by(Approval.actioned_at.desc())
+               .limit(20)
+               .all())
+
+    # Resources this faculty is mapped to
+    assigned = ResourceFacultyMapping.query.filter_by(faculty_id=fid).all()
+
+    return render_template('faculty_dashboard.html',
+                           pending=pending, history=history, assigned=assigned)
+
+
+@app.route('/faculty/action/<int:approval_id>', methods=['POST'])
+@faculty_required
+def faculty_action(approval_id):
+    action = request.form.get('action')   # 'approved' or 'rejected'
+    reason = request.form.get('reason', '').strip()
+
+    approval = Approval.query.get_or_404(approval_id)
+    if approval.faculty_id != session['user_id']:
+        flash('Unauthorised action.', 'danger')
+        return redirect(url_for('faculty_dashboard'))
+
+    approval.status      = action
+    approval.reason      = reason or None
+    approval.actioned_at = datetime.utcnow()
+    db.session.commit()
+
+    _process_approval_outcome(approval.booking_id)
+
+    flash(f'Booking #{approval.booking_id} marked as {action}.', 'success')
+    return redirect(url_for('faculty_dashboard'))
+
+
+# ═══════════════════════════════════════════════════════════════
+# APPROVAL LOGIC HELPER
+# ═══════════════════════════════════════════════════════════════
+
+def _process_approval_outcome(booking_id):
+    """
+    Re-evaluate booking status after any faculty action.
+
+    Rules:
+      ANY  → one 'approved' row is sufficient to approve the booking.
+      ALL  → every row must be 'approved' before the booking is approved.
+      Any single 'rejected' row → booking is immediately rejected.
+    """
+    booking       = Booking.query.get(booking_id)
+    rule          = ResourceApprovalRule.query.filter_by(
+                        resource_id=booking.resource_id).first()
+    all_approvals = Approval.query.filter_by(booking_id=booking_id).all()
+
+    if not all_approvals:
+        return
+
+    rejected_list = [a for a in all_approvals if a.status == 'rejected']
+    approved_list = [a for a in all_approvals if a.status == 'approved']
+
+    if rejected_list:
+        booking.status           = 'rejected'
+        booking.rejection_reason = rejected_list[0].reason or 'No reason provided.'
+    elif not rule:
+        # No rule set — default ANY behaviour
+        if approved_list:
+            booking.status = 'approved'
+    elif rule.rule_type == 'ANY' and approved_list:
+        booking.status = 'approved'
+    elif rule.rule_type == 'ALL' and len(approved_list) == len(all_approvals):
+        booking.status = 'approved'
+
+    if booking.status == 'approved':
+        if not UsageLog.query.filter_by(booking_id=booking_id).first():
+            db.session.add(UsageLog(booking_id=booking_id))
+
+    db.session.commit()
+
+
+# ═══════════════════════════════════════════════════════════════
+# ADMIN PANEL (augsd only)
+# ═══════════════════════════════════════════════════════════════
 
 @app.route('/admin')
-@login_required
-@admin_required
+@augsd_required
 def admin():
-    conn   = db.get_connection()
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute(
-        "SELECT b.booking_id, u.name AS user_name, "
-        "       r.name AS resource_name, "
-        "       ts.label AS time_slot, b.booking_date, b.status "
-        "FROM bookings b "
-        "JOIN users      u  ON b.user_id     = u.user_id "
-        "JOIN resources  r  ON b.resource_id = r.resource_id "
-        "JOIN time_slots ts ON b.slot_id     = ts.slot_id "
-        "WHERE b.requires_approval = 1 AND b.status = 'pending' "
-        "ORDER BY b.created_at"
-    )
-    pending = cursor.fetchall()
-    cursor.close()
-    conn.close()
-    return render_template('admin.html', pending=pending)
+    all_bookings   = Booking.query.order_by(Booking.created_at.desc()).all()
+    all_resources  = Resource.query.all()
+    all_faculty    = User.query.filter_by(role_id=2).all()
+    resource_types = ResourceType.query.all()
+    departments    = Department.query.all()
+
+    # Dicts for quick template lookup
+    rules        = {r.resource_id: r for r in ResourceApprovalRule.query.all()}
+    faculty_maps = {}
+    for m in ResourceFacultyMapping.query.all():
+        faculty_maps.setdefault(m.resource_id, []).append(m)
+
+    return render_template('admin.html',
+                           all_bookings=all_bookings,
+                           all_resources=all_resources,
+                           all_faculty=all_faculty,
+                           resource_types=resource_types,
+                           departments=departments,
+                           rules=rules,
+                           faculty_maps=faculty_maps)
 
 
-@app.route('/approve/<int:booking_id>', methods=['POST'])
-@login_required
-@admin_required
-def approve(booking_id):
-    action  = request.form.get('action')   # 'approved' or 'rejected'
-    remarks = request.form.get('remarks', '')
+@app.route('/admin/resource/add', methods=['POST'])
+@augsd_required
+def admin_add_resource():
+    name         = request.form['name'].strip()
+    type_id      = request.form['type_id']
+    dept_id      = request.form['dept_id']
+    capacity     = request.form.get('capacity', 1)
+    req_approval = bool(request.form.get('requires_approval'))
 
-    conn   = db.get_connection()
-    cursor = conn.cursor()
+    db.session.add(Resource(name=name, type_id=type_id, dept_id=dept_id,
+                            capacity=capacity, requires_approval=req_approval))
+    db.session.commit()
+    flash(f'Resource "{name}" added.', 'success')
+    return redirect(url_for('admin') + '#tab-resources')
 
-    # Update booking status
-    cursor.execute(
-        "UPDATE bookings SET status = %s WHERE booking_id = %s",
-        (action, booking_id)
-    )
 
-    # Record in approvals table
-    cursor.execute(
-        "INSERT INTO approvals (booking_id, approved_by, action, remarks) "
-        "VALUES (%s, %s, %s, %s)",
-        (booking_id, session['user_id'], action, remarks)
-    )
+@app.route('/admin/resource/toggle/<int:resource_id>', methods=['POST'])
+@augsd_required
+def admin_toggle_resource(resource_id):
+    r = Resource.query.get_or_404(resource_id)
+    r.is_active = not r.is_active
+    db.session.commit()
+    flash(f'Resource "{r.name}" {"activated" if r.is_active else "deactivated"}.', 'info')
+    return redirect(url_for('admin') + '#tab-resources')
 
-    # Log usage when approved
+
+@app.route('/admin/rule/set', methods=['POST'])
+@augsd_required
+def admin_set_rule():
+    resource_id = int(request.form['resource_id'])
+    rule_type   = request.form['rule_type']
+
+    rule = ResourceApprovalRule.query.filter_by(resource_id=resource_id).first()
+    if rule:
+        rule.rule_type = rule_type
+    else:
+        db.session.add(ResourceApprovalRule(resource_id=resource_id, rule_type=rule_type))
+    db.session.commit()
+    flash('Approval rule updated.', 'success')
+    return redirect(url_for('admin') + '#tab-rules')
+
+
+@app.route('/admin/rule/faculty/add', methods=['POST'])
+@augsd_required
+def admin_add_faculty():
+    resource_id = int(request.form['resource_id'])
+    faculty_id  = int(request.form['faculty_id'])
+
+    exists = ResourceFacultyMapping.query.filter_by(
+        resource_id=resource_id, faculty_id=faculty_id).first()
+    if not exists:
+        db.session.add(ResourceFacultyMapping(resource_id=resource_id,
+                                              faculty_id=faculty_id))
+        db.session.commit()
+        flash('Faculty assigned to resource.', 'success')
+    else:
+        flash('Already assigned.', 'warning')
+    return redirect(url_for('admin') + '#tab-rules')
+
+
+@app.route('/admin/rule/faculty/remove/<int:mapping_id>', methods=['POST'])
+@augsd_required
+def admin_remove_faculty(mapping_id):
+    m = ResourceFacultyMapping.query.get_or_404(mapping_id)
+    db.session.delete(m)
+    db.session.commit()
+    flash('Faculty removed from resource.', 'info')
+    return redirect(url_for('admin') + '#tab-rules')
+
+
+@app.route('/admin/override/<int:booking_id>', methods=['POST'])
+@augsd_required
+def admin_override(booking_id):
+    action = request.form['action']   # 'approved' or 'rejected'
+    reason = request.form.get('reason', 'Override by augsd.').strip()
+
+    booking = Booking.query.get_or_404(booking_id)
+    booking.status = action
+    if action == 'rejected':
+        booking.rejection_reason = reason
+
+    # Stamp all pending approvals so the audit trail is consistent
+    for a in booking.approvals:
+        if a.status == 'pending':
+            a.status      = action
+            a.reason      = f'Override by augsd: {reason}'
+            a.actioned_at = datetime.utcnow()
+
     if action == 'approved':
-        cursor.execute(
-            "INSERT INTO usage_logs (booking_id) VALUES (%s)",
-            (booking_id,)
-        )
+        if not UsageLog.query.filter_by(booking_id=booking_id).first():
+            db.session.add(UsageLog(booking_id=booking_id))
 
-    conn.commit()
-    cursor.close()
-    conn.close()
+    db.session.commit()
+    flash(f'Booking #{booking_id} overridden to {action}.', 'success')
     return redirect(url_for('admin'))
 
 
-# ── Summary page (uses VIEW + stored procedure) ───────────────
+# ═══════════════════════════════════════════════════════════════
+# SUMMARY (augsd only)
+# ═══════════════════════════════════════════════════════════════
 
 @app.route('/summary')
-@login_required
+@augsd_required
 def summary():
-    conn    = db.get_connection()
-    cursor1 = conn.cursor(dictionary=True)
+    total       = Booking.query.count()
+    by_status   = (db.session.query(Booking.status,
+                                    func.count(Booking.booking_id))
+                   .group_by(Booking.status).all())
+    top_resources = (db.session.query(Resource.name,
+                                      func.count(Booking.booking_id))
+                     .join(Booking)
+                     .group_by(Resource.resource_id)
+                     .order_by(func.count(Booking.booking_id).desc())
+                     .limit(5).all())
+    recent = Booking.query.order_by(Booking.created_at.desc()).limit(50).all()
 
-    # Use the booking_schedule VIEW
-    cursor1.execute(
-        "SELECT * FROM booking_schedule "
-        "ORDER BY booking_date DESC, start_time LIMIT 50"
-    )
-    bookings = cursor1.fetchall()
-    cursor1.close()
-
-    # Call stored procedure for resource_id = 1 (CS Lab A)
-    cursor2 = conn.cursor()
-    cursor2.callproc('GetBookingsByResource', [1])
-    proc_cols   = ['booking_id', 'user_name', 'resource_name',
-                   'slot', 'booking_date', 'status']
-    proc_results = []
-    for result in cursor2.stored_results():
-        for row in result.fetchall():
-            proc_results.append(dict(zip(proc_cols, row)))
-    cursor2.close()
-
-    conn.close()
     return render_template('summary.html',
-                           bookings=bookings,
-                           proc_results=proc_results)
+                           total=total, by_status=by_status,
+                           top_resources=top_resources, recent=recent)
 
 
-# ── AI Insights (auxiliary feature) ──────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# AI INSIGHTS
+# ═══════════════════════════════════════════════════════════════
 
 @app.route('/ai-insights')
 @login_required
 def ai_insights():
-    conn   = db.get_connection()
-    cursor = conn.cursor(dictionary=True)
+    total     = Booking.query.count()
+    by_status = (db.session.query(Booking.status,
+                                  func.count(Booking.booking_id))
+                 .group_by(Booking.status).all())
+    top_resources = (db.session.query(Resource.name,
+                                      func.count(Booking.booking_id))
+                     .join(Booking)
+                     .group_by(Resource.resource_id)
+                     .order_by(func.count(Booking.booking_id).desc())
+                     .limit(3).all())
 
-    cursor.execute("SELECT COUNT(*) AS total FROM bookings")
-    total = cursor.fetchone()['total']
-
-    cursor.execute(
-        "SELECT status, COUNT(*) AS count FROM bookings GROUP BY status"
-    )
-    status_counts = cursor.fetchall()
-
-    cursor.execute(
-        "SELECT r.name, COUNT(*) AS bookings "
-        "FROM bookings b JOIN resources r ON b.resource_id = r.resource_id "
-        "GROUP BY r.resource_id ORDER BY bookings DESC LIMIT 3"
-    )
-    top_resources = cursor.fetchall()
-
-    cursor.close()
-    conn.close()
-
-    stats      = {'total': total,
-                  'by_status': status_counts,
-                  'top_resources': top_resources}
-    ai_summary = _generate_summary(stats)
-
+    stats = {
+        'total':         total,
+        'by_status':     [{'status': s, 'count': c} for s, c in by_status],
+        'top_resources': [{'name': n, 'bookings': c} for n, c in top_resources],
+    }
     return render_template('ai_insights.html',
-                           stats=stats, ai_summary=ai_summary)
-
-
-# def _generate_summary(stats):
-#     """Call Anthropic API; fall back to rule-based summary if no key."""
-#     if not ANTHROPIC_API_KEY:
-#         return _local_summary(stats)
-
-#     prompt = (
-#         "You are an assistant for a college campus resource booking system.\n"
-#         f"Total bookings: {stats['total']}\n"
-#         f"Status breakdown: {json.dumps(stats['by_status'], default=str)}\n"
-#         f"Top 3 booked resources: {json.dumps(stats['top_resources'], default=str)}\n\n"
-#         "Write a concise 3–4 sentence admin dashboard summary highlighting "
-#         "usage trends, pending items, and any notable patterns."
-#     )
-
-#     try:
-#         resp = requests.post(
-#             'https://api.anthropic.com/v1/messages',
-#             headers={
-#                 'x-api-key':          ANTHROPIC_API_KEY,
-#                 'anthropic-version':  '2023-06-01',
-#                 'content-type':       'application/json'
-#             },
-#             json={
-#                 'model':      'claude-sonnet-4-20250514',
-#                 'max_tokens': 300,
-#                 'messages':   [{'role': 'user', 'content': prompt}]
-#             },
-#             timeout=15
-#         )
-#         return resp.json()['content'][0]['text']
-#     except Exception:
-#         return _local_summary(stats)
+                           stats=stats, ai_summary=_generate_summary(stats))
 
 
 def _generate_summary(stats):
-    """Call Anthropic API; fall back to rule-based summary if no key set."""
     if not ANTHROPIC_API_KEY:
         return _local_summary(stats)
-
     prompt = (
         "You are an assistant for a college campus resource booking system.\n"
         f"Total bookings: {stats['total']}\n"
-        f"Status breakdown: {json.dumps(stats['by_status'], default=str)}\n"
-        f"Top 3 booked resources: {json.dumps(stats['top_resources'], default=str)}\n\n"
+        f"Status breakdown: {json.dumps(stats['by_status'])}\n"
+        f"Top resources: {json.dumps(stats['top_resources'])}\n\n"
         "Write a concise 3–4 sentence admin dashboard summary highlighting "
         "usage trends, pending items, and any notable patterns."
     )
-
     try:
         resp = requests.post(
             'https://api.anthropic.com/v1/messages',
-            headers={
-                'x-api-key':         ANTHROPIC_API_KEY,
-                'anthropic-version': '2023-06-01',
-                'content-type':      'application/json'
-            },
-            json={
-                'model':     'claude-sonnet-4-6',   # ← fixed model name
-                'max_tokens': 300,
-                'messages':  [{'role': 'user', 'content': prompt}]
-            },
+            headers={'x-api-key': ANTHROPIC_API_KEY,
+                     'anthropic-version': '2023-06-01',
+                     'content-type': 'application/json'},
+            json={'model': 'claude-sonnet-4-6', 'max_tokens': 300,
+                  'messages': [{'role': 'user', 'content': prompt}]},
             timeout=15
         )
-
-        resp.raise_for_status()   # raises on 4xx/5xx so you see the real error
+        resp.raise_for_status()
         data = resp.json()
-
-        # Surface any API-level error (e.g. invalid key, rate limit)
         if 'error' in data:
             return f"[API error] {data['error'].get('message', data['error'])}"
-
         return data['content'][0]['text']
-
     except requests.exceptions.HTTPError as e:
-        return f"[HTTP error {e.response.status_code}] {e.response.text[:200]}"
-    except requests.exceptions.ConnectionError:
-        return "[Connection error] Could not reach the Anthropic API. Check your internet connection."
-    except requests.exceptions.Timeout:
-        return "[Timeout] The Anthropic API took too long to respond."
+        return f"[HTTP {e.response.status_code}] {e.response.text[:200]}"
     except Exception as e:
-        return f"[Unexpected error] {str(e)}"
+        return f"[Error] {e}"
+
 
 def _local_summary(stats):
-    """Rule-based fallback — no external API needed."""
-    pending  = next((s['count'] for s in stats['by_status']
-                     if s['status'] == 'pending'), 0)
-    approved = next((s['count'] for s in stats['by_status']
-                     if s['status'] == 'approved'), 0)
-    top = stats['top_resources'][0]['name'] if stats['top_resources'] else 'N/A'
-    return (
-        f"The system has {stats['total']} total bookings recorded. "
-        f"{approved} bookings are confirmed and {pending} are awaiting approval. "
-        f"The most frequently booked resource is '{top}'. "
-        "Overall resource utilization appears steady across departments."
-    )
-
-if __name__ == '__main__':
-    app.run(debug=True)
+    pending  = next((s['count'] for s in stats['by_status'] if s['status'] == 'pending'), 0)
+    approved = next((s['count'] for s in stats['by_status'] if s['status'] == 'approved'), 0)
+    top      = stats['top_resources'][0]['name'] if stats['top_resources'] else 'N/A'
+    return (f"The system has {stats['total']} total bookings recorded. "
+            f"{approved} are confirmed and {pending} are awaiting approval. "
+            f"The most frequently booked resource is '{top}'. "
+            "Overall resource utilisation appears steady across departments.")
+            

@@ -3,12 +3,10 @@
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-  <h4 class="fw-bold">
+  <h4 class="fw-bold mb-0">
     {% if session.role_id == 3 %}All Bookings{% else %}My Bookings{% endif %}
   </h4>
-  <a href="{{ url_for('book') }}" class="btn btn-primary btn-sm">
-    + New Booking
-  </a>
+  <a href="{{ url_for('book') }}" class="btn btn-primary btn-sm">+ New Booking</a>
 </div>
 
 {% if bookings %}
@@ -17,32 +15,72 @@
     <thead class="table-primary">
       <tr>
         <th>#</th>
-        {% if session.role_id == 3 %}<th>User</th><th>Dept</th>{% endif %}
+        {% if session.role_id == 3 %}<th>User</th>{% endif %}
         <th>Resource</th>
-        <th>Type</th>
-        <th>Time Slot</th>
+        <th>Slot</th>
         <th>Date</th>
         <th>Status</th>
+        <th>Approval Progress</th>
       </tr>
     </thead>
     <tbody>
       {% for b in bookings %}
-      <tr>
+      {% set badge_map = {'approved':'success','pending':'warning','rejected':'danger','cancelled':'secondary'} %}
+      <tr class="{% if b.status == 'rejected' %}table-danger{% endif %}">
         <td>{{ b.booking_id }}</td>
         {% if session.role_id == 3 %}
-        <td>{{ b.user_name }}</td>
-        <td>{{ b.dept_name }}</td>
+        <td>{{ b.user.name }}</td>
         {% endif %}
-        <td>{{ b.resource_name }}</td>
-        <td><span class="badge bg-secondary">{{ b.resource_type }}</span></td>
-        <td>{{ b.time_slot }}</td>
+        <td>{{ b.resource.name }}</td>
+        <td>{{ b.slot.label }}</td>
         <td>{{ b.booking_date }}</td>
         <td>
-          {% set badge = {'approved':'success','pending':'warning',
-                          'rejected':'danger','cancelled':'secondary'} %}
-          <span class="badge bg-{{ badge.get(b.status,'secondary') }}">
+          <span class="badge bg-{{ badge_map.get(b.status, 'secondary') }}">
             {{ b.status | capitalize }}
           </span>
+        </td>
+        <td>
+          {% if b.requires_approval and b.approvals %}
+            {% set total    = b.approvals | length %}
+            {% set approved = b.approvals | selectattr('status','equalto','approved') | list | length %}
+            {% set rejected = b.approvals | selectattr('status','equalto','rejected') | list | length %}
+            {% set rule     = b.resource.approval_rule %}
+
+            <div class="d-flex align-items-center gap-2">
+              {% if rule %}
+              <span class="badge bg-info text-dark">{{ rule.rule_type }}</span>
+              {% endif %}
+              <span class="text-muted small">{{ approved }}/{{ total }} approved</span>
+            </div>
+
+            {# Approval breakdown per faculty #}
+            {% for a in b.approvals %}
+            <div class="small mt-1">
+              <span class="badge
+                {% if a.status == 'approved' %}bg-success
+                {% elif a.status == 'rejected' %}bg-danger
+                {% else %}bg-secondary{% endif %}">
+                {{ a.status }}
+              </span>
+              {{ a.faculty.name }}
+              {% if a.reason %}
+              <span class="text-muted">— {{ a.reason }}</span>
+              {% endif %}
+            </div>
+            {% endfor %}
+
+            {# Rejection reason shown to the booking owner #}
+            {% if b.status == 'rejected' and b.rejection_reason %}
+            <div class="alert alert-danger py-1 px-2 mt-1 mb-0 small">
+              <strong>Reason:</strong> {{ b.rejection_reason }}
+            </div>
+            {% endif %}
+
+          {% elif not b.requires_approval %}
+            <span class="text-muted small">Auto-approved</span>
+          {% else %}
+            <span class="text-muted small">No faculty assigned</span>
+          {% endif %}
         </td>
       </tr>
       {% endfor %}
@@ -50,8 +88,8 @@
   </table>
 </div>
 {% else %}
-<div class="alert alert-info">No bookings found. 
-  <a href="{{ url_for('book') }}">Create one now!</a>
+<div class="alert alert-info">
+  No bookings yet. <a href="{{ url_for('book') }}">Create one!</a>
 </div>
 {% endif %}
 {% endblock %}

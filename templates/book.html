@@ -4,21 +4,18 @@
 {% block content %}
 <div class="row justify-content-center">
   <div class="col-md-6">
-
     <h4 class="fw-bold mb-3">Book a Campus Resource</h4>
 
     {% if message %}
     <div class="alert alert-success">✅ {{ message }}</div>
     {% endif %}
-
     {% if error %}
     <div class="alert alert-danger">❌ {{ error }}</div>
     {% endif %}
 
     <div class="card shadow-sm">
       <div class="card-body p-4">
-        <form method="POST" action="{{ url_for('book') }}"
-              id="bookForm" novalidate>
+        <form method="POST" action="{{ url_for('book') }}" id="bookForm" novalidate>
 
           <div class="mb-3">
             <label class="form-label fw-semibold">Resource</label>
@@ -26,12 +23,24 @@
               <option value="">— Select a resource —</option>
               {% for r in resources %}
               <option value="{{ r.resource_id }}"
-                      data-approval="{{ r.requires_approval }}">
-                {{ r.name }} (capacity: {{ r.capacity }})
-                {% if r.requires_approval %}⚠ Needs approval{% endif %}
+                      data-approval="{{ 1 if r.requires_approval else 0 }}"
+                      data-rule="{{ approval_info[r.resource_id].rule_type
+                                   if r.resource_id in approval_info else '' }}"
+                      data-faculty="{{ approval_info[r.resource_id].faculty_count
+                                      if r.resource_id in approval_info else 0 }}">
+                {{ r.name }}
+                (cap: {{ r.capacity }})
+                {% if r.requires_approval %} ⚠{% endif %}
               </option>
               {% endfor %}
             </select>
+          </div>
+
+          {# Approval hint — filled by JS below #}
+          <div id="approvalHint" class="alert alert-warning py-2 small d-none">
+            <strong>Approval required.</strong>
+            Rule: <span id="hintRule"></span> &nbsp;|&nbsp;
+            <span id="hintFaculty"></span> faculty reviewer(s).
           </div>
 
           <div class="mb-3">
@@ -39,54 +48,48 @@
             <select class="form-select" name="slot_id" required>
               <option value="">— Select a slot —</option>
               {% for s in slots %}
-              <option value="{{ s.slot_id }}">
-                {{ s.label }}
-              </option>
+              <option value="{{ s.slot_id }}">{{ s.label }}</option>
               {% endfor %}
             </select>
           </div>
 
-          <div class="mb-3">
+          <div class="mb-4">
             <label class="form-label fw-semibold">Date</label>
             <input type="date" class="form-control" name="booking_date"
                    id="bookingDate" required>
           </div>
 
-          <div id="approvalNote" class="alert alert-warning d-none py-2 small">
-            ⚠ This resource requires admin approval before it is confirmed.
-          </div>
-
-          <button type="submit" class="btn btn-primary w-100">
-            Submit Booking
-          </button>
+          <button type="submit" class="btn btn-primary w-100">Submit Booking</button>
         </form>
       </div>
     </div>
-
   </div>
 </div>
 
 <script>
-/* Set minimum date to today */
-document.getElementById('bookingDate').min =
-    new Date().toISOString().split('T')[0];
+document.getElementById('bookingDate').min = new Date().toISOString().split('T')[0];
 
-/* Show approval warning when a restricted resource is selected */
-document.getElementById('resourceSelect').addEventListener('change', function() {
-  const selected = this.options[this.selectedIndex];
-  const note     = document.getElementById('approvalNote');
-  note.classList.toggle('d-none', selected.dataset.approval !== '1');
+const sel   = document.getElementById('resourceSelect');
+const hint  = document.getElementById('approvalHint');
+const hRule = document.getElementById('hintRule');
+const hFac  = document.getElementById('hintFaculty');
+
+sel.addEventListener('change', function () {
+  const opt = this.options[this.selectedIndex];
+  if (opt.dataset.approval === '1') {
+    hRule.textContent = opt.dataset.rule || 'ANY';
+    hFac.textContent  = opt.dataset.faculty || '?';
+    hint.classList.remove('d-none');
+  } else {
+    hint.classList.add('d-none');
+  }
 });
 
-/* Basic validation */
-document.getElementById('bookForm').addEventListener('submit', function(e) {
-  const resource = document.querySelector('[name="resource_id"]').value;
-  const slot     = document.querySelector('[name="slot_id"]').value;
-  const date     = document.querySelector('[name="booking_date"]').value;
-  if (!resource || !slot || !date) {
-    e.preventDefault();
-    alert('Please fill in all fields before submitting.');
-  }
+document.getElementById('bookForm').addEventListener('submit', function (e) {
+  const r = document.querySelector('[name="resource_id"]').value;
+  const s = document.querySelector('[name="slot_id"]').value;
+  const d = document.querySelector('[name="booking_date"]').value;
+  if (!r || !s || !d) { e.preventDefault(); alert('Fill in all fields.'); }
 });
 </script>
 {% endblock %}

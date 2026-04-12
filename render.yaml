@@ -1,0 +1,23 @@
+# render.yaml — Render infrastructure-as-code.
+# Commit this file. Render reads it automatically on first deploy.
+
+services:
+  - type: web
+    name: urb-system
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --workers 2 --timeout 120
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true          # Render auto-generates a secure value
+      - key: DATABASE_URL
+        fromDatabase:
+          name: urb-postgres
+          property: connectionString  # Render injects the Postgres URI automatically
+      - key: ANTHROPIC_API_KEY
+        sync: false                  # You paste this in the Render dashboard manually
+
+databases:
+  - name: urb-postgres
+    databaseName: unified_booking
+    plan: free                      # Render free tier (90-day limit, then upgrade)
