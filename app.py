@@ -37,6 +37,14 @@ app.wsgi_app = WhiteNoise(app.wsgi_app, root='static/', prefix='static')
 with app.app_context():
     db.create_all()
 
+from models import Role
+
+with app.app_context():
+    db.create_all()
+
+    # Run seed only if DB is empty
+    if not Role.query.first():
+        import seed
 # ═══════════════════════════════════════════════════════════════
 # DECORATORS
 # ═══════════════════════════════════════════════════════════════
@@ -551,4 +559,3 @@ def _local_summary(stats):
             f"{approved} are confirmed and {pending} are awaiting approval. "
             f"The most frequently booked resource is '{top}'. "
             "Overall resource utilisation appears steady across departments.")
-            
