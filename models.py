@@ -74,7 +74,7 @@ class ResourceApprovalRule(db.Model):
     resource_id = db.Column(db.Integer,
                             db.ForeignKey('resources.resource_id'),
                             unique=True, nullable=False)
-    rule_type   = db.Column(db.Enum('ANY', 'ALL'), nullable=False, default='ANY')
+    rule_type   = db.Column(db.Enum('ANY', 'ALL', name="booking_status_enum1"), nullable=False, default='ANY')
 
 
 class ResourceFacultyMapping(db.Model):
@@ -99,7 +99,7 @@ class Booking(db.Model):
     slot_id           = db.Column(db.Integer, db.ForeignKey('time_slots.slot_id'), nullable=False)
     booking_date      = db.Column(db.Date, nullable=False)
     status            = db.Column(
-        db.Enum('pending', 'approved', 'rejected', 'cancelled'),
+        db.Enum('pending', 'approved', 'rejected', 'cancelled', name="booking_status_enum2"),
         default='pending'
     )
     requires_approval = db.Column(db.Boolean, default=False)
@@ -119,7 +119,7 @@ class Approval(db.Model):
     approval_id = db.Column(db.Integer, primary_key=True)
     booking_id  = db.Column(db.Integer, db.ForeignKey('bookings.booking_id'), nullable=False)
     faculty_id  = db.Column(db.Integer, db.ForeignKey('users.user_id'), nullable=False)
-    status      = db.Column(db.Enum('pending', 'approved', 'rejected'), default='pending')
+    status      = db.Column(db.Enum('pending', 'approved', 'rejected', name="booking_status_enum3"), default='pending')
     reason      = db.Column(db.Text, nullable=True)
     actioned_at = db.Column(db.DateTime, nullable=True)
 
