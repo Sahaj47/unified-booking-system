@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Admin – Approvals{% endblock %}
+
+{% block content %}
+<h4 class="fw-bold mb-3">⚙ Admin Panel — Pending Approvals</h4>
+
+{% if pending %}
+<div class="table-responsive">
+  <table class="table table-bordered align-middle">
+    <thead class="table-warning">
+      <tr>
+        <th>Booking #</th>
+        <th>User</th>
+        <th>Resource</th>
+        <th>Slot</th>
+        <th>Date</th>
+        <th>Status</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in pending %}
+      <tr>
+        <td>{{ p.booking_id }}</td>
+        <td>{{ p.user_name }}</td>
+        <td>{{ p.resource_name }}</td>
+        <td>{{ p.time_slot }}</td>
+        <td>{{ p.booking_date }}</td>
+        <td>
+          <span class="badge bg-warning text-dark">Pending</span>
+        </td>
+        <td>
+          <!-- Approve form -->
+          <form method="POST"
+                action="{{ url_for('approve', booking_id=p.booking_id) }}"
+                class="d-inline approveForm">
+            <input type="hidden" name="action" value="approved">
+            <input type="text" name="remarks" class="form-control form-control-sm d-inline w-auto"
+                   placeholder="Remarks (optional)" style="max-width:160px">
+            <button type="submit" class="btn btn-success btn-sm">✔ Approve</button>
+          </form>
+
+          <!-- Reject form -->
+          <form method="POST"
+                action="{{ url_for('approve', booking_id=p.booking_id) }}"
+                class="d-inline ms-1">
+            <input type="hidden" name="action" value="rejected">
+            <button type="submit" class="btn btn-danger btn-sm"
+                    onclick="return confirm('Reject this booking?')">
+              ✖ Reject
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="alert alert-success">
+  ✅ No pending approvals at the moment.
+</div>
+{% endif %}
+{% endblock %}

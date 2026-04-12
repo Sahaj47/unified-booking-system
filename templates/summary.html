@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Summary{% endblock %}
+
+{% block content %}
+<h4 class="fw-bold mb-1">Booking Summary</h4>
+<p class="text-muted small mb-3">
+  Powered by the <code>booking_schedule</code> SQL VIEW
+</p>
+
+<!-- Full schedule from VIEW -->
+<div class="table-responsive mb-5">
+  <table class="table table-sm table-striped table-bordered">
+    <thead class="table-dark">
+      <tr>
+        <th>#</th><th>User</th><th>Dept</th>
+        <th>Resource</th><th>Slot</th>
+        <th>Date</th><th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for b in bookings %}
+      <tr>
+        <td>{{ b.booking_id }}</td>
+        <td>{{ b.user_name }}</td>
+        <td>{{ b.dept_name }}</td>
+        <td>{{ b.resource_name }}</td>
+        <td>{{ b.time_slot }}</td>
+        <td>{{ b.booking_date }}</td>
+        <td>
+          {% set badge = {'approved':'success','pending':'warning',
+                          'rejected':'danger','cancelled':'secondary'} %}
+          <span class="badge bg-{{ badge.get(b.status,'secondary') }}">
+            {{ b.status | capitalize }}
+          </span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Stored procedure result -->
+<h5 class="fw-bold">
+  Stored Procedure Result —
+  <code>CALL GetBookingsByResource(1)</code>
+  <span class="text-muted">(CS Lab A)</span>
+</h5>
+
+{% if proc_results %}
+<div class="table-responsive">
+  <table class="table table-sm table-bordered">
+    <thead class="table-secondary">
+      <tr>
+        <th>#</th><th>User</th><th>Resource</th>
+        <th>Slot</th><th>Date</th><th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in proc_results %}
+      <tr>
+        <td>{{ r.booking_id }}</td>
+        <td>{{ r.user_name }}</td>
+        <td>{{ r.resource_name }}</td>
+        <td>{{ r.slot }}</td>
+        <td>{{ r.booking_date }}</td>
+        <td>{{ r.status }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="text-muted">No bookings found for CS Lab A.</p>
+{% endif %}
+{% endblock %}

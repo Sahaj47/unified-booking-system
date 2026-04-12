@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}Sign Up{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-4">
+  <div class="col-md-6">
+
+    <div class="card shadow-sm">
+      <div class="card-body p-4">
+
+        <h3 class="card-title text-center mb-1 fw-bold text-primary">
+          📅 URB System
+        </h3>
+        <p class="text-center text-muted mb-4">Create your campus account</p>
+
+        {% if message %}
+        <div class="alert alert-success py-2">
+          ✅ {{ message }}
+          <a href="{{ url_for('login') }}" class="alert-link">Sign in →</a>
+        </div>
+        {% endif %}
+
+        {% if error %}
+        <div class="alert alert-danger py-2">❌ {{ error }}</div>
+        {% endif %}
+
+        <form method="POST" action="{{ url_for('signup') }}"
+              id="signupForm" novalidate>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Full Name</label>
+            <input type="text" class="form-control" name="name"
+                   placeholder="e.g. Alice Sharma" required>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Email address</label>
+            <input type="email" class="form-control" name="email"
+                   placeholder="you@college.edu" required>
+          </div>
+
+          <div class="row g-3 mb-3">
+            <div class="col">
+              <label class="form-label fw-semibold">Department</label>
+              <select class="form-select" name="dept_id" required>
+                <option value="">— Select —</option>
+                {% for d in departments %}
+                <option value="{{ d.dept_id }}">{{ d.dept_name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="col">
+              <label class="form-label fw-semibold">Role</label>
+              <select class="form-select" name="role_id" required>
+                <option value="">— Select —</option>
+                {% for r in roles %}
+                <option value="{{ r.role_id }}">
+                  {{ r.role_name | capitalize }}
+                </option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Password</label>
+            <input type="password" class="form-control" name="password"
+                   id="pw" placeholder="Min. 6 characters" required>
+          </div>
+
+          <div class="mb-4">
+            <label class="form-label fw-semibold">Confirm Password</label>
+            <input type="password" class="form-control" name="confirm_password"
+                   id="pw2" placeholder="Re-enter password" required>
+            <div id="pwMismatch" class="form-text text-danger d-none">
+              Passwords do not match.
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-primary w-100">
+            Create Account
+          </button>
+        </form>
+
+        <p class="text-center text-muted small mt-3 mb-0">
+          Already have an account?
+          <a href="{{ url_for('login') }}">Sign in</a>
+        </p>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* Live password match check */
+const pw  = document.getElementById('pw');
+const pw2 = document.getElementById('pw2');
+const msg = document.getElementById('pwMismatch');
+
+pw2.addEventListener('input', () => {
+  msg.classList.toggle('d-none', pw.value === pw2.value);
+});
+
+/* Block submit if fields are invalid */
+document.getElementById('signupForm').addEventListener('submit', function(e) {
+  const fields = ['name', 'email', 'password', 'confirm_password',
+                  'dept_id', 'role_id'];
+  const empty  = fields.some(f => !this[f]?.value.trim());
+
+  if (empty) {
+    e.preventDefault();
+    alert('Please fill in all fields.');
+    return;
+  }
+  if (pw.value !== pw2.value) {
+    e.preventDefault();
+    alert('Passwords do not match.');
+    return;
+  }
+  if (pw.value.length < 6) {
+    e.preventDefault();
+    alert('Password must be at least 6 characters.');
+  }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,30 @@
+/* ── Unified Resource Booking System — Custom styles ─────────── */
+
+body {
+  background-color: #f8f9fa;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.navbar-brand {
+  letter-spacing: 0.5px;
+}
+
+.card {
+  border-radius: 10px;
+}
+
+.table th {
+  font-size: 0.85rem;
+  letter-spacing: 0.3px;
+}
+
+/* Status badge colours already handled inline via Bootstrap */
+
+.alert {
+  border-radius: 8px;
+}
+
+/* Make login card stand out slightly */
+.card.shadow-sm {
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08) !important;
+}

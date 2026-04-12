@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}AI Insights{% endblock %}
+
+{% block content %}
+<h4 class="fw-bold mb-1">🤖 AI Insights</h4>
+<p class="text-muted small mb-4">
+  Booking statistics are pulled from MySQL and summarised using the
+  Anthropic Claude API (falls back to rule-based summary if no key is set).
+  <strong>AI has no write access to the database.</strong>
+</p>
+
+<div class="row g-3 mb-4">
+  <!-- Total bookings card -->
+  <div class="col-md-4">
+    <div class="card text-center border-primary h-100">
+      <div class="card-body">
+        <h2 class="text-primary fw-bold">{{ stats.total }}</h2>
+        <p class="mb-0 text-muted">Total Bookings</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status breakdown -->
+  <div class="col-md-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h6 class="card-title fw-bold">By Status</h6>
+        <ul class="list-unstyled mb-0">
+          {% for s in stats.by_status %}
+          <li>
+            <span class="badge bg-secondary">{{ s.status }}</span>
+            {{ s.count }}
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Top resources -->
+  <div class="col-md-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h6 class="card-title fw-bold">Top Resources</h6>
+        <ol class="mb-0">
+          {% for r in stats.top_resources %}
+          <li>{{ r.name }} — {{ r.bookings }} bookings</li>
+          {% endfor %}
+        </ol>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- AI-generated summary -->
+<div class="card border-0 bg-light">
+  <div class="card-body">
+    <h6 class="fw-bold mb-2">🤖 Generated Summary</h6>
+    <p class="mb-0">{{ ai_summary }}</p>
+  </div>
+</div>
+{% endblock %}

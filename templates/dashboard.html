@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="fw-bold">
+    {% if session.role_id == 3 %}All Bookings{% else %}My Bookings{% endif %}
+  </h4>
+  <a href="{{ url_for('book') }}" class="btn btn-primary btn-sm">
+    + New Booking
+  </a>
+</div>
+
+{% if bookings %}
+<div class="table-responsive">
+  <table class="table table-hover table-bordered align-middle">
+    <thead class="table-primary">
+      <tr>
+        <th>#</th>
+        {% if session.role_id == 3 %}<th>User</th><th>Dept</th>{% endif %}
+        <th>Resource</th>
+        <th>Type</th>
+        <th>Time Slot</th>
+        <th>Date</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for b in bookings %}
+      <tr>
+        <td>{{ b.booking_id }}</td>
+        {% if session.role_id == 3 %}
+        <td>{{ b.user_name }}</td>
+        <td>{{ b.dept_name }}</td>
+        {% endif %}
+        <td>{{ b.resource_name }}</td>
+        <td><span class="badge bg-secondary">{{ b.resource_type }}</span></td>
+        <td>{{ b.time_slot }}</td>
+        <td>{{ b.booking_date }}</td>
+        <td>
+          {% set badge = {'approved':'success','pending':'warning',
+                          'rejected':'danger','cancelled':'secondary'} %}
+          <span class="badge bg-{{ badge.get(b.status,'secondary') }}">
+            {{ b.status | capitalize }}
+          </span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="alert alert-info">No bookings found. 
+  <a href="{{ url_for('book') }}">Create one now!</a>
+</div>
+{% endif %}
+{% endblock %}

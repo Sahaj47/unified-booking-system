@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Login{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-5">
+  <div class="col-md-5">
+
+    <div class="card shadow-sm">
+      <div class="card-body p-4">
+
+        <h3 class="card-title text-center mb-1 fw-bold text-primary">
+          📅 URB System
+        </h3>
+        <p class="text-center text-muted mb-4">Campus Resource Booking</p>
+
+        {% if error %}
+        <div class="alert alert-danger py-2">{{ error }}</div>
+        {% endif %}
+
+        <form method="POST" action="{{ url_for('login') }}"
+              id="loginForm" novalidate>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Email address</label>
+            <input type="email" class="form-control" name="email"
+                   placeholder="you@college.edu" required>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Password</label>
+            <input type="password" class="form-control" name="password"
+                   placeholder="Password" required>
+          </div>
+
+          <button type="submit" class="btn btn-primary w-100">
+            Sign In
+          </button>
+        </form>
+
+        <hr class="my-3">
+        <p class="text-center text-muted small mt-3 mb-2">
+          New here?
+          <a href="{{ url_for('signup') }}">Create an account</a>
+        </p>
+        <p class="text-muted small text-center mb-0">
+          Demo logins — all use password <code>pass123</code><br>
+          Student: <code>alice@college.edu</code> &nbsp;|&nbsp;
+          Admin: <code>admin@college.edu</code>
+        </p>
+
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+/* Client-side validation — runs before form submit */
+document.getElementById('loginForm').addEventListener('submit', function(e) {
+  const email    = this.email.value.trim();
+  const password = this.password.value;
+  if (!email || !password) {
+    e.preventDefault();
+    alert('Please fill in both email and password.');
+  }
+});
+</script>
+{% endblock %}
