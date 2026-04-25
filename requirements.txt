@@ -16,3 +16,6 @@ requests>=2.31
 
 # Environment variable loading (local dev only — Render injects env vars directly)
 python-dotenv>=1.0
+
+# For running and generating the pdf
+reportlab
