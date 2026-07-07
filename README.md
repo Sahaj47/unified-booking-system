@@ -7,7 +7,7 @@ This system eliminates scheduling conflicts and manual coordination overhead by 
 ## 📄 Project Report & Architecture
 A comprehensive project report detailing our 3NF database schema, technology stack, user privileges, SQL views, and team contributions has been programmatically generated using Python.
 
-* **View the full report:** [URBS_Project_Report.pdf](./URBS_Project_Report.pdf)
+* **View the full report:** [URBS_Project_Report.pdf](./URBS_Project_Report.pdf) (SideNOTE : This project is coded and implemented by me, team roles and all for compliance with formal submission.)
 * **How it was built:** The report was generated entirely via code using `gen_pdf_v3.py` and the ReportLab library.
 
 ## 🚀 Local Development Setup
