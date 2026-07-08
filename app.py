@@ -23,6 +23,13 @@ app.secret_key = SECRET_KEY
 app.config['SQLALCHEMY_DATABASE_URI']        = SQLALCHEMY_DATABASE_URI
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'pool_pre_ping': True,
+    'pool_recycle':  240,
+    'pool_size':     5,
+    'max_overflow':  2,
+}
+
 db.init_app(app)
 
 # Serve static files via WhiteNoise (works without a reverse proxy on Render)
