@@ -1,8 +1,4 @@
-# app.py — only the app factory section changes.
-# All routes, decorators, and helpers are UNCHANGED.
-
 import json
-import requests
 from datetime import datetime
 from functools import wraps
 
@@ -13,7 +9,8 @@ from sqlalchemy import func
 # WhiteNoise serves /static/ directly from gunicorn — no Nginx needed on Render
 from whitenoise import WhiteNoise
 
-from config import SQLALCHEMY_DATABASE_URI, SECRET_KEY, ANTHROPIC_API_KEY
+import google.generativeai as genai
+from config import SQLALCHEMY_DATABASE_URI, SECRET_KEY, GEMINI_API_KEY
 from models import (db, Department, Role, User, ResourceType, Resource,
                     TimeSlot, ResourceApprovalRule, ResourceFacultyMapping,
                     Booking, Approval, UsageLog)
@@ -526,9 +523,15 @@ def ai_insights():
                            stats=stats, ai_summary=_generate_summary(stats))
 
 
+# At module level, after imports — configure once, not per-call
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+
+
 def _generate_summary(stats):
-    if not ANTHROPIC_API_KEY:
+    if not GEMINI_API_KEY:
         return _local_summary(stats)
+
     prompt = (
         "You are an assistant for a college campus resource booking system.\n"
         f"Total bookings: {stats['total']}\n"
@@ -537,25 +540,16 @@ def _generate_summary(stats):
         "Write a concise 3–4 sentence admin dashboard summary highlighting "
         "usage trends, pending items, and any notable patterns."
     )
+
     try:
-        resp = requests.post(
-            'https://api.anthropic.com/v1/messages',
-            headers={'x-api-key': ANTHROPIC_API_KEY,
-                     'anthropic-version': '2023-06-01',
-                     'content-type': 'application/json'},
-            json={'model': 'claude-sonnet-4-6', 'max_tokens': 300,
-                  'messages': [{'role': 'user', 'content': prompt}]},
-            timeout=15
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        if 'error' in data:
-            return f"[API error] {data['error'].get('message', data['error'])}"
-        return data['content'][0]['text']
-    except requests.exceptions.HTTPError as e:
-        return f"[HTTP {e.response.status_code}] {e.response.text[:200]}"
+        model    = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content(prompt)
+        return response.text
+
+    except genai.types.generation_types.BlockedPromptException:
+        return "[Gemini Error] Prompt was blocked by the safety filter."
     except Exception as e:
-        return f"[Error] {e}"
+        return f"[Gemini Error] {str(e)}"
 
 
 def _local_summary(stats):
