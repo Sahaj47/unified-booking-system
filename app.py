@@ -523,14 +523,8 @@ def ai_insights():
                            stats=stats, ai_summary=_generate_summary(stats))
 
 
-# At module level, after imports — configure once, not per-call
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-
-
 # Module level — create client once
 _gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
-
 
 def _generate_summary(stats):
     if not _gemini_client:
