@@ -546,8 +546,8 @@ def _generate_summary(stats):
         )
         return response.text
 
-    except Exception as e:
-        return f"[Gemini Error] {str(e)}"
+    except Exception:
+        return _local_summary(stats)
 
 
 def _local_summary(stats):
