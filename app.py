@@ -9,7 +9,7 @@ from sqlalchemy import func
 # WhiteNoise serves /static/ directly from gunicorn — no Nginx needed on Render
 from whitenoise import WhiteNoise
 
-import google.generativeai as genai
+from google import genai
 from config import SQLALCHEMY_DATABASE_URI, SECRET_KEY, GEMINI_API_KEY
 from models import (db, Department, Role, User, ResourceType, Resource,
                     TimeSlot, ResourceApprovalRule, ResourceFacultyMapping,
@@ -528,8 +528,12 @@ if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
 
+# Module level — create client once
+_gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+
+
 def _generate_summary(stats):
-    if not GEMINI_API_KEY:
+    if not _gemini_client:
         return _local_summary(stats)
 
     prompt = (
@@ -542,12 +546,12 @@ def _generate_summary(stats):
     )
 
     try:
-        model    = genai.GenerativeModel("gemini-1.5-flash")
-        response = model.generate_content(prompt)
+        response = _gemini_client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt
+        )
         return response.text
 
-    except genai.types.generation_types.BlockedPromptException:
-        return "[Gemini Error] Prompt was blocked by the safety filter."
     except Exception as e:
         return f"[Gemini Error] {str(e)}"
 
