@@ -41,7 +41,7 @@ role-based access control, and real-time status tracking.
 | Database | PostgreSQL (Supabase managed cloud) |
 | Server | Gunicorn (WSGI), WhiteNoise (static files) |
 | Deployment | Render |
-| AI | Google Gemini API (`gemini-1.5-flash`) |
+| AI | Google Gemini API (`gemini-3.5-flash`) |
 
 ---
 
